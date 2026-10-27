@@ -49,15 +49,7 @@ pub const ROUTE_WEIGHT_ALL: u32 = 1_000_000_000;
 #[derive(BorshSerialize, BorshDeserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Venue {
     RaydiumAmm,
-    // FILL_IN: add your venue variant here, in the SAME position as in
-    // `state.rs`. Include any CPI parameters the router must pass to your venue
-    // adapter, such as direction flags.
-    TemplateVenue { zero_for_one: bool },
-}
-
-#[allow(dead_code)]
-fn fill_in_route_venue_variant() -> ! {
-    todo!("add your route Venue variant in the same position as the program enum")
+    KipseliPropAmm { is_base_to_quote: bool },
 }
 
 impl Venue {
@@ -96,11 +88,9 @@ pub fn protocol_to_venue(
 ) -> Result<Venue, TradingVenueError> {
     match venue.protocol() {
         PoolProtocol::RaydiumAMM => Ok(Venue::RaydiumAmm),
-        // FILL_IN: map your PoolProtocol variant to your Venue variant.
-        PoolProtocol::YourPoolProtocol => {
-            let _ = (venue, request);
-            todo!("map YourPoolProtocol to your Venue variant")
-        }
+        PoolProtocol::KipseliPropAmm => Ok(Venue::KipseliPropAmm {
+            is_base_to_quote: request.input_mint == venue.get_token(0)?.pubkey,
+        }),
     }
 }
 
@@ -342,14 +332,14 @@ mod tests {
     fn venue_borsh_bytes_are_stable() {
         assert_eq!(Venue::RaydiumAmm.to_borsh_bytes(), vec![0]);
         assert_eq!(
-            Venue::TemplateVenue {
-                zero_for_one: false,
+            Venue::KipseliPropAmm {
+                is_base_to_quote: false,
             }
             .to_borsh_bytes(),
             vec![1, 0]
         );
         assert_eq!(
-            Venue::TemplateVenue { zero_for_one: true }.to_borsh_bytes(),
+            Venue::KipseliPropAmm { is_base_to_quote: true }.to_borsh_bytes(),
             vec![1, 1]
         );
     }

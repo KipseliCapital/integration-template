@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 arrayref = "0.3.6"
+ethnum = "1"
 bytemuck = { version = "1.22", features = ["derive"] }
 num_enum = "0.5.7"
 enumflags2 = "0.6.4"
