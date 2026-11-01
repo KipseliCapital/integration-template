@@ -14,16 +14,16 @@ fn venue_enum_matches_route_builder() {
     let cases = [
         (ProgramVenue::RaydiumAmm, RouteBuilderVenue::RaydiumAmm),
         (
-            ProgramVenue::TemplateVenue {
-                zero_for_one: false,
+            ProgramVenue::KipseliPropAmm {
+                is_base_to_quote: false,
             },
-            RouteBuilderVenue::TemplateVenue {
-                zero_for_one: false,
+            RouteBuilderVenue::KipseliPropAmm {
+                is_base_to_quote: false,
             },
         ),
         (
-            ProgramVenue::TemplateVenue { zero_for_one: true },
-            RouteBuilderVenue::TemplateVenue { zero_for_one: true },
+            ProgramVenue::KipseliPropAmm { is_base_to_quote: true },
+            RouteBuilderVenue::KipseliPropAmm { is_base_to_quote: true },
         ),
     ];
 
