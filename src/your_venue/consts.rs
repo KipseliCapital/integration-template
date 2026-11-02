@@ -18,6 +18,7 @@ pub const HARD_ZONE_TARGET_MULTIPLIER: u64 = 3;
 
 pub const FEE_TIER_SIZE: usize = 16;
 pub const MAX_FEE_TIERS: usize = 7;
+pub const MAX_TITAN_FLOW_TYPES: usize = 8;
 
 pub const DISCRIMINATOR_LEN: usize = 8;
 
@@ -55,7 +56,8 @@ pub mod pool_offsets {
     pub const MULTIPLY_FEE_AMOUNT_IN_VOLUME: usize = QUOTE_AMOUNT_IN_VOLUME + 344;
     pub const MIN_SLIPPAGE_IN_PPM: usize = MULTIPLY_FEE_AMOUNT_IN_VOLUME + 8;
     pub const SLOT_GAP_FEE_GROWTH_BASE: usize = MIN_SLIPPAGE_IN_PPM + 8;
-    pub const MIN_LEN: usize = SLOT_GAP_FEE_GROWTH_BASE + 8;
+    pub const TITAN_FLOW_FEE_PPM: usize = SLOT_GAP_FEE_GROWTH_BASE + 88;
+    pub const MIN_LEN: usize = TITAN_FLOW_FEE_PPM + 8 * super::MAX_TITAN_FLOW_TYPES;
 }
 
 pub mod create_pool_accounts {
