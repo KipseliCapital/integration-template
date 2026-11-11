@@ -25,8 +25,9 @@ use crate::{
 
 use consts::{
     BAN_SEED, CREATE_POOL_DISCRIMINATOR, FEE_TIER_SIZE, HARD_ZONE_TARGET_MULTIPLIER,
-    JITO_VOTE_ACCOUNT, KIPSELI_PROGRAM_ID, MAX_FEE_TIERS, MAX_PPM, POOL_DISCRIMINATOR,
-    SPL_TOKEN_AMOUNT_OFFSET, SWAP_V3_DISCRIMINATOR, create_pool_accounts, pool_offsets,
+    JITO_VOTE_ACCOUNT, KIPSELI_PROGRAM_ID, MAX_FEE_TIERS, MAX_PPM, MAX_TITAN_FLOW_TYPES,
+    MOST_TOXIC_SCORE, POOL_DISCRIMINATOR, SPL_TOKEN_AMOUNT_OFFSET, SWAP_V3_DISCRIMINATOR,
+    create_pool_accounts, pool_offsets,
 };
 use math::{Curve, FeeTier, insufficient_liquidity, overflow};
 
@@ -70,6 +71,7 @@ struct PoolState {
     base_amount_in_volume: u64,
     quote_amount_in_volume: u64,
     multiply_fee_amount_in_volume: u64,
+    titan_flow_fee_ppm: [u64; MAX_TITAN_FLOW_TYPES],
 }
 
 fn read_u64(data: &[u8], offset: usize) -> Result<u64, TradingVenueError> {
@@ -100,6 +102,22 @@ fn read_fee_tiers(data: &[u8], offset: usize) -> Result<[FeeTier; MAX_FEE_TIERS]
         };
     }
     Ok(tiers)
+}
+
+fn read_titan_flow_fees(data: &[u8]) -> Result<[u64; MAX_TITAN_FLOW_TYPES], TradingVenueError> {
+    let mut fees = [0u64; MAX_TITAN_FLOW_TYPES];
+    for (i, fee) in fees.iter_mut().enumerate() {
+        *fee = read_u64(data, pool_offsets::TITAN_FLOW_FEE_PPM + i * 8)?;
+    }
+    Ok(fees)
+}
+
+/// Unknown flow (`None` or a score past `MOST_TOXIC_SCORE`) is treated as the most toxic score.
+fn toxicity_score(request: &QuoteRequest) -> u8 {
+    request
+        .toxicity_score
+        .filter(|&score| score <= MOST_TOXIC_SCORE)
+        .unwrap_or(MOST_TOXIC_SCORE)
 }
 
 fn check_pool_account(pubkey: &Pubkey, account: &Account) -> Result<(), TradingVenueError> {
@@ -138,6 +156,7 @@ fn parse_pool_state(data: &[u8]) -> Result<PoolState, TradingVenueError> {
         base_amount_in_volume: read_u64(data, pool_offsets::BASE_AMOUNT_IN_VOLUME)?,
         quote_amount_in_volume: read_u64(data, pool_offsets::QUOTE_AMOUNT_IN_VOLUME)?,
         multiply_fee_amount_in_volume: read_u64(data, pool_offsets::MULTIPLY_FEE_AMOUNT_IN_VOLUME)?,
+        titan_flow_fee_ppm: read_titan_flow_fees(data)?,
     })
 }
 
@@ -351,10 +370,16 @@ impl TradingVenue for KipseliVenue {
             tiers,
             s.multiply_fee_amount_in_volume,
         );
+        let titan_flow_fee = s
+            .titan_flow_fee_ppm
+            .get(toxicity_score(&request) as usize)
+            .copied()
+            .unwrap_or(0);
         let fee = s
             .fee_in_ppm
             .checked_add(volume_fee)
             .and_then(|f| f.checked_add(slot_gap_fee))
+            .and_then(|f| f.checked_add(titan_flow_fee))
             .ok_or_else(overflow)?;
         if fee > MAX_PPM {
             return Ok(not_quotable);
@@ -362,6 +387,7 @@ impl TradingVenue for KipseliVenue {
 
         let marginal_fee_ppm = s.fee_in_ppm as f64
             + slot_gap_fee as f64
+            + titan_flow_fee as f64
             + math::more_fee_rate(
                 accumulated_volume,
                 amount,
@@ -456,11 +482,12 @@ impl TradingVenue for KipseliVenue {
         let user_quote_ata = get_associated_token_address(&user, &self.quote_mint);
         let user_ban_entry = ban_entry_pda(&user);
 
-        let mut data = Vec::with_capacity(25);
+        let mut data = Vec::with_capacity(26);
         data.extend_from_slice(&SWAP_V3_DISCRIMINATOR);
         data.extend_from_slice(&request.amount.to_le_bytes());
         data.extend_from_slice(&0u64.to_le_bytes());
         data.push(is_base_to_quote as u8);
+        data.push(toxicity_score(&request));
 
         Ok(Instruction {
             program_id: KIPSELI_PROGRAM_ID,
@@ -513,5 +540,39 @@ impl AddressLookupTableTrait for KipseliVenue {
             INSTRUCTIONS_SYSVAR_ID,
             KIPSELI_PROGRAM_ID,
         ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(toxicity_score: Option<u8>) -> QuoteRequest {
+        QuoteRequest {
+            input_mint: Pubkey::new_unique(),
+            output_mint: Pubkey::new_unique(),
+            amount: 1_000,
+            swap_type: SwapType::ExactIn,
+            toxicity_score,
+        }
+    }
+
+    #[test]
+    fn toxicity_score_keeps_valid_scores() {
+        for score in 0..=MOST_TOXIC_SCORE {
+            assert_eq!(toxicity_score(&request(Some(score))), score);
+        }
+    }
+
+    #[test]
+    fn toxicity_score_treats_none_as_most_toxic() {
+        assert_eq!(toxicity_score(&request(None)), MOST_TOXIC_SCORE);
+    }
+
+    #[test]
+    fn toxicity_score_treats_out_of_range_as_most_toxic() {
+        for score in [MOST_TOXIC_SCORE + 1, 7, 8, u8::MAX] {
+            assert_eq!(toxicity_score(&request(Some(score))), MOST_TOXIC_SCORE);
+        }
     }
 }
