@@ -24,7 +24,7 @@ use crate::{
 };
 
 use consts::{
-    BAN_SEED, CREATE_POOL_DISCRIMINATOR, FEE_TIER_SIZE, HARD_ZONE_TARGET_MULTIPLIER,
+    UNATTESTED_FEE_INDEX, BAN_SEED, CREATE_POOL_DISCRIMINATOR, FEE_TIER_SIZE, HARD_ZONE_TARGET_MULTIPLIER,
     JITO_VOTE_ACCOUNT, KIPSELI_PROGRAM_ID, MAX_FEE_TIERS, MAX_PPM, MAX_TITAN_FLOW_TYPES,
     MOST_TOXIC_SCORE, POOL_DISCRIMINATOR, SPL_TOKEN_AMOUNT_OFFSET, SWAP_V3_DISCRIMINATOR,
     create_pool_accounts, pool_offsets,
@@ -72,6 +72,7 @@ struct PoolState {
     quote_amount_in_volume: u64,
     multiply_fee_amount_in_volume: u64,
     titan_flow_fee_ppm: [u64; MAX_TITAN_FLOW_TYPES],
+    unattested_fee_ppm: u64,
 }
 
 fn read_u64(data: &[u8], offset: usize) -> Result<u64, TradingVenueError> {
@@ -157,6 +158,7 @@ fn parse_pool_state(data: &[u8]) -> Result<PoolState, TradingVenueError> {
         quote_amount_in_volume: read_u64(data, pool_offsets::QUOTE_AMOUNT_IN_VOLUME)?,
         multiply_fee_amount_in_volume: read_u64(data, pool_offsets::MULTIPLY_FEE_AMOUNT_IN_VOLUME)?,
         titan_flow_fee_ppm: read_titan_flow_fees(data)?,
+        unattested_fee_ppm: read_u64(data, pool_offsets::UNATTESTED_FEE_PPM + UNATTESTED_FEE_INDEX * 8).unwrap_or(0),
     })
 }
 
@@ -380,6 +382,7 @@ impl TradingVenue for KipseliVenue {
             .checked_add(volume_fee)
             .and_then(|f| f.checked_add(slot_gap_fee))
             .and_then(|f| f.checked_add(titan_flow_fee))
+            .and_then(|f| f.checked_add(s.unattested_fee_ppm))
             .ok_or_else(overflow)?;
         if fee > MAX_PPM {
             return Ok(not_quotable);
@@ -388,6 +391,7 @@ impl TradingVenue for KipseliVenue {
         let marginal_fee_ppm = s.fee_in_ppm as f64
             + slot_gap_fee as f64
             + titan_flow_fee as f64
+            + s.unattested_fee_ppm as f64
             + math::more_fee_rate(
                 accumulated_volume,
                 amount,
@@ -555,6 +559,21 @@ mod tests {
             swap_type: SwapType::ExactIn,
             toxicity_score,
         }
+    }
+
+    #[test]
+    fn unattested_fee_offset_matches_pool_layout() {
+        assert_eq!(pool_offsets::UNATTESTED_FEE_PPM, 992);
+    }
+
+    #[test]
+    fn parse_pool_state_reads_unattested_fee() {
+        let mut data = vec![0u8; pool_offsets::MIN_LEN];
+        assert_eq!(parse_pool_state(&data).unwrap().unattested_fee_ppm, 0);
+        data.resize(pool_offsets::UNATTESTED_FEE_PPM + 16 * 8, 0);
+        let off = pool_offsets::UNATTESTED_FEE_PPM + UNATTESTED_FEE_INDEX * 8;
+        data[off..off + 8].copy_from_slice(&700u64.to_le_bytes());
+        assert_eq!(parse_pool_state(&data).unwrap().unattested_fee_ppm, 700);
     }
 
     #[test]
